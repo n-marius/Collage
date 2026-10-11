@@ -16,19 +16,20 @@
 </head>
 <body>
 <header>
-  <h1>Collage</h1>
-  <button id="btnSave" class="primary">Speichern</button>
+  <button id="btnProjects" class="title" aria-label="Projekte"><span id="projName">Collage</span> ▾</button>
+  <button id="btnSave" class="primary">Exportieren</button>
 </header>
 
 <main>
   <div id="stage">
     <canvas id="canvas" aria-label="Collage-Vorschau"></canvas>
   </div>
-  <p class="hint" id="hint">Feld antippen, um ein Bild zu wählen. Ein Finger verschiebt, zwei Finger zoomen.</p>
+  <p class="hint" id="hint">Leeres Feld antippen: Bild wählen. Ein Finger verschiebt, zwei Finger zoomen. Ausgewähltes Bild erneut antippen: Auswahlrahmen aus.</p>
 
   <section class="panel">
     <div class="row">
       <button id="btnAddMany">Mehrere Bilder hinzufügen</button>
+      <button id="btnClear">Collage leeren</button>
     </div>
 
     <div class="group" id="selGroup" hidden>
@@ -42,6 +43,11 @@
     </div>
 
     <div class="group">
+      <h2>Layout</h2>
+      <div class="seg" id="layout"></div>
+    </div>
+
+    <div class="group">
       <h2>Format</h2>
       <div class="seg" id="format">
         <button data-v="1:1">1:1</button>
@@ -51,7 +57,7 @@
       </div>
     </div>
 
-    <div class="group">
+    <div class="group" data-control="center">
       <h2>Mittleres Bild</h2>
       <label class="slider">Größe <input type="range" id="centerSize" min="15" max="85" step="1"><output id="centerSizeOut"></output></label>
       <div class="seg" id="centerShape">
@@ -88,7 +94,7 @@
 <input type="file" id="fileOne" accept="image/*" hidden>
 <input type="file" id="fileMany" accept="image/*" multiple hidden>
 
-<div id="sheet" hidden>
+<div id="sheet" class="overlay" hidden>
   <div class="sheet-inner">
     <img id="result" alt="Fertige Collage">
     <p class="hint">Mit „Sichern / Teilen“ → „Bild sichern“ landet es in Fotos. Alternativ Bild lange drücken.</p>
@@ -96,6 +102,17 @@
       <button id="btnShare" class="primary">Sichern / Teilen</button>
       <button id="btnClose">Schließen</button>
     </div>
+  </div>
+</div>
+
+<div id="projects" class="overlay" hidden>
+  <div class="sheet-inner">
+    <div class="row">
+      <button id="btnNewProject" class="primary">Neues Projekt</button>
+      <button id="btnCloseProjects">Schließen</button>
+    </div>
+    <ul id="projectList"></ul>
+    <p class="hint" id="storageHint"></p>
   </div>
 </div>
 
