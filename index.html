@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Collage</title>
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Collage">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Collage</h1>
+  <button id="btnSave" class="primary">Speichern</button>
+</header>
+
+<main>
+  <div id="stage">
+    <canvas id="canvas" aria-label="Collage-Vorschau"></canvas>
+  </div>
+  <p class="hint" id="hint">Feld antippen, um ein Bild zu wählen. Ein Finger verschiebt, zwei Finger zoomen.</p>
+
+  <section class="panel">
+    <div class="row">
+      <button id="btnAddMany">Mehrere Bilder hinzufügen</button>
+    </div>
+
+    <div class="group" id="selGroup" hidden>
+      <h2 id="selTitle">Ausgewähltes Bild</h2>
+      <label class="slider">Zoom <input type="range" id="zoom" min="1" max="5" step="0.01" value="1"></label>
+      <div class="row">
+        <button id="btnReplace">Ersetzen</button>
+        <button id="btnCenter">Zentrieren</button>
+        <button id="btnRemove">Entfernen</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>Format</h2>
+      <div class="seg" id="format">
+        <button data-v="1:1">1:1</button>
+        <button data-v="4:5">4:5</button>
+        <button data-v="3:4">3:4</button>
+        <button data-v="9:16">9:16</button>
+      </div>
+    </div>
+
+    <div class="group">
+      <h2>Mittleres Bild</h2>
+      <label class="slider">Größe <input type="range" id="centerSize" min="15" max="85" step="1"><output id="centerSizeOut"></output></label>
+      <div class="seg" id="centerShape">
+        <button data-v="canvas">Rechteck</button>
+        <button data-v="square">Quadrat</button>
+        <button data-v="circle">Kreis</button>
+      </div>
+      <label class="toggle"><input type="checkbox" id="centerOn"> Mittleres Bild anzeigen</label>
+    </div>
+
+    <div class="group">
+      <h2>Rahmen</h2>
+      <label class="slider">Stärke <input type="range" id="border" min="0" max="80" step="1"><output id="borderOut"></output></label>
+      <div class="colors" id="swatches">
+        <button data-c="#ffffff" style="background:#ffffff" aria-label="Weiß"></button>
+        <button data-c="#000000" style="background:#000000" aria-label="Schwarz"></button>
+        <button data-c="#f2ede4" style="background:#f2ede4" aria-label="Creme"></button>
+        <button data-c="#8a8a8a" style="background:#8a8a8a" aria-label="Grau"></button>
+        <label class="picker" aria-label="Eigene Farbe"><input type="color" id="color"></label>
+      </div>
+      <label class="toggle"><input type="checkbox" id="outer"> Außenrand</label>
+    </div>
+
+    <div class="group">
+      <h2>Export</h2>
+      <div class="seg" id="exportScale">
+        <button data-v="1">1080 px (Instagram)</button>
+        <button data-v="2">2160 px</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<input type="file" id="fileOne" accept="image/*" hidden>
+<input type="file" id="fileMany" accept="image/*" multiple hidden>
+
+<div id="sheet" hidden>
+  <div class="sheet-inner">
+    <img id="result" alt="Fertige Collage">
+    <p class="hint">Mit „Sichern / Teilen“ → „Bild sichern“ landet es in Fotos. Alternativ Bild lange drücken.</p>
+    <div class="row">
+      <button id="btnShare" class="primary">Sichern / Teilen</button>
+      <button id="btnClose">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
