@@ -6,6 +6,13 @@ const FORMATS = { '1:1': 1, '4:5': 1.25, '3:4': 4 / 3, '9:16': 16 / 9 };
 const MAX_ZOOM = 5;
 const MAX_IMG_SIDE = 3240; // Arbeitsgröße begrenzen (Speicher auf dem iPhone)
 
+// Zwei Funktionen teilen sich diesen Code: Foto-Collage ('still') und bewegte Collage ('motion', ?m=motion).
+const MODE = new URLSearchParams(location.search).get('m') === 'motion' ? 'motion' : 'still';
+const KEY = (k) => (MODE === 'motion' ? 'motion-' : 'collage-') + k;
+const LIVE_LEN = 3;      // Standardlänge eines Livebilds in Sekunden
+const LIVE_MAX = 4;      // kürzere Videos gelten zunächst als Livebild
+const FPS = 30;
+
 // ---------- Layouts ----------
 // Neues Layout = neuer Eintrag. cells() liefert die Felder in Zeichenreihenfolge:
 //   x, y, w, h       Feld in Pixeln
@@ -45,18 +52,27 @@ const DEFAULTS = {
   centerOn: true,
   centerSize: 42,
   centerShape: 'canvas',
+  length: 1, // nur bewegte Collage: 1 = einfache, 2 = doppelte Livebild-Länge
 };
 
 // Projektbezogene Einstellungen; zuletzt benutzte dienen als Vorlage für neue Projekte.
 let settings = { ...DEFAULTS };
-try { Object.assign(settings, JSON.parse(localStorage.getItem('collage-settings') || '{}')); } catch (e) {}
+try { Object.assign(settings, JSON.parse(localStorage.getItem(KEY('settings')) || '{}')); } catch (e) {}
 if (!LAYOUTS[settings.layout]) settings.layout = DEFAULTS.layout;
 let exportScale = 1;
 try { exportScale = Number(localStorage.getItem('collage-export-scale')) || 1; } catch (e) {}
 
-// Laufzeit-Slots: img = Arbeitsbild (Canvas), imageId = Original in der Datenbank.
+// Laufzeit-Slots: img = Arbeitsbild (Canvas) oder vid = Video-Element; imageId = Original in der Datenbank.
+// live: Clip wird wie ein Livebild behandelt; start: Startpunkt eines Videos in Sekunden.
 // ox/oy: Verschiebung relativ zur Feldbreite/-höhe, damit sie bei jeder Auflösung gilt.
-const emptySlot = () => ({ img: null, imageId: null, zoom: 1, ox: 0, oy: 0 });
+const emptySlot = () => ({ img: null, vid: null, imageId: null, kind: null, live: false, start: 0, zoom: 1, ox: 0, oy: 0 });
+const hasMedia = (s) => !!(s.img || s.vid);
+function mediaDims(s) {
+  if (s.img) return { w: s.img.width, h: s.img.height };
+  if (s.vid && s.vid.videoWidth) return { w: s.vid.videoWidth, h: s.vid.videoHeight };
+  return null;
+}
+const mediaSource = (s) => s.img || (s.vid && s.vid.readyState >= 2 ? s.vid : null);
 let slots = [];
 let selected = -1;
 let project = null; // { id, name, created, updated }
@@ -88,7 +104,9 @@ function shapePath(c, r, pad) {
 
 // Liefert Skalierung und auf gültigen Bereich begrenzte Verschiebung in Pixeln.
 function placement(slot, r) {
-  const iw = slot.img.width, ih = slot.img.height;
+  const d = mediaDims(slot);
+  if (!d) return null;
+  const iw = d.w, ih = d.h;
   const s = Math.max(r.w / iw, r.h / ih) * slot.zoom;
   const dw = iw * s, dh = ih * s;
   const mx = (dw - r.w) / 2, my = (dh - r.h) / 2;
@@ -101,11 +119,14 @@ function drawSlot(c, slot, r, preview) {
   c.save();
   shapePath(c, r, 0);
   c.clip();
-  if (slot.img) {
-    const p = placement(slot, r);
+  const src = mediaSource(slot), p = src && placement(slot, r);
+  if (p) {
     c.imageSmoothingEnabled = true;
     c.imageSmoothingQuality = 'high';
-    c.drawImage(slot.img, r.x + r.w / 2 - p.dw / 2 + p.px, r.y + r.h / 2 - p.dh / 2 + p.py, p.dw, p.dh);
+    c.drawImage(src, r.x + r.w / 2 - p.dw / 2 + p.px, r.y + r.h / 2 - p.dh / 2 + p.py, p.dw, p.dh);
+  } else if (hasMedia(slot)) {
+    c.fillStyle = '#3f3f46'; // Video lädt noch
+    c.fillRect(r.x, r.y, r.w, r.h);
   } else if (preview) {
     c.fillStyle = '#d4d4d8';
     c.fillRect(r.x, r.y, r.w, r.h);
@@ -154,6 +175,9 @@ function render(c, W, k, mode) {
 let pending = false;
 function draw() {
   scheduleSave();
+  requestRender();
+}
+function requestRender() {
   if (pending) return;
   pending = true;
   requestAnimationFrame(() => {
@@ -198,6 +222,11 @@ const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Date.now().toString
 
 let saveTimer = null, loading = false, storageOk = true;
 
+// Projekte der jeweiligen Funktion, neueste zuerst (ältere Projekte ohne mode gehören zur Foto-Collage)
+async function myProjects() {
+  return (await dbAll('projects')).filter((p) => (p.mode || 'still') === MODE).sort((a, b) => b.updated - a.updated);
+}
+
 function scheduleSave() {
   if (!project || loading) return;
   clearTimeout(saveTimer);
@@ -208,13 +237,14 @@ async function saveProject() {
   clearTimeout(saveTimer);
   saveTimer = null;
   if (!project || loading) return;
-  try { localStorage.setItem('collage-settings', JSON.stringify(settings)); } catch (e) {}
+  try { localStorage.setItem(KEY('settings'), JSON.stringify(settings)); } catch (e) {}
   const p = project;
   p.updated = Date.now();
   const rec = {
     ...p,
     settings: { ...settings },
-    slots: slots.map((s) => ({ imageId: s.imageId, zoom: s.zoom, ox: s.ox, oy: s.oy })),
+    mode: MODE,
+    slots: slots.map((s) => ({ imageId: s.imageId, kind: s.kind, live: s.live, start: s.start, zoom: s.zoom, ox: s.ox, oy: s.oy })),
     thumb: await thumbnail(),
   };
   try { await dbPut('projects', rec); storageOk = true; } catch (e) { storageOk = false; }
@@ -228,19 +258,26 @@ function thumbnail() {
   return new Promise((res) => c.toBlob(res, 'image/jpeg', 0.8));
 }
 
-function freeImages() {
-  slots.forEach((s) => { if (s.img) { s.img.width = 0; s.img.height = 0; } });
+function freeMedia(s) {
+  if (s.img) { s.img.width = 0; s.img.height = 0; } // Speicher sofort freigeben (iOS)
+  if (s.vid) {
+    s.vid.pause();
+    URL.revokeObjectURL(s.vid.src);
+    s.vid.removeAttribute('src');
+    s.vid.load();
+  }
 }
 
 function applyProject(rec) {
-  freeImages();
+  setPlaying(false);
+  slots.forEach(freeMedia);
   project = { id: rec.id, name: rec.name, created: rec.created, updated: rec.updated };
   settings = { ...DEFAULTS, ...rec.settings };
   if (!LAYOUTS[settings.layout]) settings.layout = DEFAULTS.layout;
-  slots = (rec.slots || []).map((s) => ({ ...emptySlot(), ...s, img: null }));
+  slots = (rec.slots || []).map((s) => ({ ...emptySlot(), ...s, img: null, vid: null }));
   ensureSlots();
   selected = -1;
-  try { localStorage.setItem('collage-current', rec.id); } catch (e) {}
+  try { localStorage.setItem(KEY('current'), rec.id); } catch (e) {}
   syncUI();
   select(-1);
 }
@@ -258,14 +295,13 @@ async function openProject(id) {
     if (!s.imageId) return;
     try {
       const im = await dbGet('images', s.imageId);
-      const img = im && await loadImage(im.blob);
-      if (token !== loadToken) { if (img) img.width = img.height = 0; return; }
-      s.img = img || null;
-      if (!img) s.imageId = null;
+      const m = im && await loadMedia(im.blob);
+      if (token !== loadToken) { if (m) freeMedia(m); return; }
+      if (m) Object.assign(s, m); else s.imageId = null;
     } catch (e) { s.imageId = null; }
-    draw();
+    requestRender();
   }));
-  if (token === loadToken) { loading = false; draw(); }
+  if (token === loadToken) { loading = false; syncTimeline(); draw(); }
   return true;
 }
 
@@ -274,7 +310,8 @@ async function newProject() {
   loadToken++;
   loading = false;
   const now = Date.now();
-  applyProject({ id: uid(), name: 'Projekt ' + fmtDate(now), created: now, updated: now, settings: { ...settings }, slots: [] });
+  applyProject({ id: uid(), name: (MODE === 'motion' ? 'Bewegt ' : 'Projekt ') + fmtDate(now), created: now, updated: now, settings: { ...settings }, slots: [] });
+  syncTimeline();
   await saveProject();
 }
 
@@ -285,7 +322,7 @@ async function deleteProject(id) {
   await dbDel('projects', id);
   if (project && project.id === id) {
     project = null;
-    const rest = (await dbAll('projects')).sort((a, b) => b.updated - a.updated);
+    const rest = await myProjects();
     if (!rest.length || !(await openProject(rest[0].id))) await newProject();
   }
 }
@@ -297,9 +334,9 @@ async function init() {
   draw();
   try {
     let id = null;
-    try { id = localStorage.getItem('collage-current'); } catch (e) {}
+    try { id = localStorage.getItem(KEY('current')); } catch (e) {}
     if (!(id && await openProject(id))) {
-      const all = (await dbAll('projects')).sort((a, b) => b.updated - a.updated);
+      const all = await myProjects();
       if (!(all.length && await openProject(all[0].id))) await newProject();
     }
   } catch (e) {
@@ -307,7 +344,11 @@ async function init() {
   }
 }
 
-document.addEventListener('visibilitychange', () => { if (document.hidden && saveTimer) saveProject(); });
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) return;
+  setPlaying(false);
+  if (saveTimer) saveProject();
+});
 window.addEventListener('pagehide', () => { if (saveTimer) saveProject(); });
 
 // ---------- Projektliste ----------
@@ -320,7 +361,7 @@ async function showProjects() {
   const list = $('projectList');
   list.textContent = '';
   let all = [];
-  try { all = (await dbAll('projects')).sort((a, b) => b.updated - a.updated); } catch (e) { storageOk = false; }
+  try { all = await myProjects(); } catch (e) { storageOk = false; }
   $('storageHint').textContent = storageOk
     ? 'Projekte werden automatisch auf diesem Gerät gespeichert.'
     : 'Speichern auf diesem Gerät ist nicht möglich (z. B. privates Surfen).';
@@ -404,18 +445,71 @@ async function loadImage(blob) {
   }
 }
 
-// Bild in Slot setzen (file = null entfernt das Bild).
+const isVideo = (b) => /^video\//.test(b.type) || /\.(mov|mp4|m4v)$/i.test(b.name || '');
+
+function once(el, ok, ms) {
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => done(rej, new Error('Zeitüberschreitung')), ms);
+    const onOk = () => done(res);
+    const onErr = () => done(rej, new Error('Medium nicht lesbar'));
+    function done(f, v) { clearTimeout(t); el.removeEventListener(ok, onOk); el.removeEventListener('error', onErr); f(v); }
+    el.addEventListener(ok, onOk);
+    el.addEventListener('error', onErr);
+  });
+}
+
+async function seekTo(v, t) {
+  t = clamp(t, 0, Math.max(0, v.duration - 0.04));
+  if (Math.abs(v.currentTime - t) < 0.002 && v.readyState >= 2 && !v.seeking) return;
+  const p = once(v, 'seeked', 4000).catch(() => {});
+  v.currentTime = t;
+  await p;
+}
+
+async function loadVideo(blob) {
+  const v = document.createElement('video');
+  v.muted = true;
+  v.playsInline = true;
+  v.setAttribute('playsinline', '');
+  v.preload = 'auto';
+  v.src = URL.createObjectURL(blob);
+  try {
+    await once(v, 'loadedmetadata', 15000);
+    if (!v.videoWidth || !isFinite(v.duration)) throw new Error('Video nicht lesbar');
+    // iOS lädt Bilddaten teils erst nach einem Abspielversuch
+    if (v.readyState < 2) { try { await v.play(); v.pause(); } catch (e) {} }
+    await seekTo(v, 0);
+  } catch (e) {
+    URL.revokeObjectURL(v.src);
+    throw e;
+  }
+  v.addEventListener('seeked', requestRender);
+  v.addEventListener('loadeddata', requestRender);
+  return v;
+}
+
+async function loadMedia(blob) {
+  if (isVideo(blob)) {
+    if (MODE !== 'motion') throw new Error('Videos nur in der bewegten Collage');
+    return { vid: await loadVideo(blob), kind: 'video' };
+  }
+  return { img: await loadImage(blob), kind: 'image' };
+}
+
+// Medium in Slot setzen (file = null entfernt es).
 async function setImage(i, file) {
-  const img = file ? await loadImage(file) : null;
+  const m = file ? await loadMedia(file) : {};
   let imageId = null;
   if (file) {
     imageId = uid();
     try { await dbPut('images', { id: imageId, blob: file }); } catch (e) { storageOk = false; }
   }
   const old = slots[i];
-  if (old.img) { old.img.width = 0; old.img.height = 0; } // Speicher sofort freigeben (iOS)
+  freeMedia(old);
   if (old.imageId) dbDel('images', old.imageId).catch(() => {});
-  slots[i] = { ...emptySlot(), img, imageId };
+  slots[i] = { ...emptySlot(), ...m, imageId };
+  if (m.vid) slots[i].live = m.vid.duration <= LIVE_MAX;
+  syncTimeline();
 }
 
 let fileTarget = -1;
@@ -426,7 +520,7 @@ $('fileOne').addEventListener('change', async (e) => {
   try {
     await setImage(fileTarget, f);
     select(fileTarget);
-  } catch (err) { alert('Bild konnte nicht geladen werden.'); }
+  } catch (err) { alert('Datei konnte nicht geladen werden.'); }
   draw();
 });
 
@@ -435,7 +529,7 @@ $('fileMany').addEventListener('change', async (e) => {
   e.target.value = '';
   const cells = layout(BASE_W, 1).cells;
   const order = cells.map((c, i) => i).filter((i) => !cells[i].hidden);
-  let free = order.filter((i) => !slots[i].img);
+  let free = order.filter((i) => !hasMedia(slots[i]));
   if (files.length > free.length) free = order; // zu viele: von vorn überschreiben
   for (let n = 0; n < files.length && n < free.length; n++) {
     try { await setImage(free[n], files[n]); } catch (err) {}
@@ -456,7 +550,8 @@ function select(i) {
   if (i >= 0) {
     $('selTitle').textContent = 'Ausgewählt: ' + layoutDef().slotNames[i];
     $('zoom').value = slots[i].zoom;
-    const has = !!slots[i].img;
+    const has = hasMedia(slots[i]);
+    syncClipUI();
     $('zoom').disabled = !has;
     $('btnCenter').disabled = !has;
     $('btnRemove').disabled = !has;
@@ -466,7 +561,7 @@ function select(i) {
 }
 
 $('zoom').addEventListener('input', (e) => {
-  if (selected < 0 || !slots[selected].img) return;
+  if (selected < 0 || !mediaDims(slots[selected])) return;
   setZoom(selected, parseFloat(e.target.value));
   draw();
 });
@@ -483,8 +578,8 @@ $('btnRemove').addEventListener('click', async () => {
 });
 $('btnAddMany').addEventListener('click', () => $('fileMany').click());
 $('btnClear').addEventListener('click', async () => {
-  if (!slots.some((s) => s.img) || !confirm('Alle Bilder aus dieser Collage entfernen?')) return;
-  for (let i = 0; i < slots.length; i++) if (slots[i].img || slots[i].imageId) await setImage(i, null);
+  if (!slots.some(hasMedia) || !confirm('Alle Bilder aus dieser Collage entfernen?')) return;
+  for (let i = 0; i < slots.length; i++) if (hasMedia(slots[i]) || slots[i].imageId) await setImage(i, null);
   select(-1);
 });
 
@@ -499,6 +594,7 @@ function syncUI() {
 }
 function changed() {
   if (selected >= 0 && layout(BASE_W, 1).cells[selected].hidden) select(-1);
+  syncTimeline();
   syncUI();
   draw();
 }
@@ -527,6 +623,7 @@ bindSeg('exportScale', () => exportScale, (v) => {
   exportScale = v;
   try { localStorage.setItem('collage-export-scale', String(v)); } catch (e) {}
 }, Number);
+bindSeg('length', () => settings.length, (v) => { settings.length = v; }, Number);
 
 function bindRange(id, key, fmt) {
   const el = $(id), out = $(id + 'Out');
@@ -567,6 +664,135 @@ $('color').addEventListener('input', (e) => {
   changed();
 });
 
+// ---------- Bewegte Collage: Zeitachse, Vorschau, Clip-Einstellungen ----------
+// Einfache Länge = längstes Livebild (sonst 3 s). Livebilder laufen einmal durch, bei doppelter Länge
+// danach rückwärts; leicht abweichende Livebild-Längen werden auf die gemeinsame Länge gedehnt.
+// Videos laufen ab ihrem Startpunkt vorwärts über die gesamte Länge.
+
+function videoSlots() {
+  if (MODE !== 'motion') return [];
+  const cells = layout(BASE_W, 1).cells;
+  return slots.map((s, i) => i).filter((i) => slots[i].vid && cells[i] && !cells[i].hidden);
+}
+function baseLen() {
+  let m = 0;
+  for (const i of videoSlots()) if (slots[i].live) m = Math.max(m, slots[i].vid.duration);
+  return m || LIVE_LEN;
+}
+const totalLen = () => baseLen() * settings.length;
+const maxStart = (s) => Math.max(0, s.vid.duration - totalLen());
+
+function srcTime(s, t) {
+  if (s.live) {
+    let u = t / baseLen();
+    if (u > 1) u = 2 - u;
+    return u * s.vid.duration;
+  }
+  return s.start + t;
+}
+
+let playing = false, playT0 = 0, previewT = 0;
+
+function syncVideos(t, play) {
+  const L = baseLen();
+  for (const i of videoSlots()) {
+    const s = slots[i], v = s.vid, st = srcTime(s, t);
+    const forward = !s.live || t <= L;
+    if (play && forward) {
+      v.playbackRate = s.live ? clamp(v.duration / L, 0.5, 2) : 1;
+      if (v.paused) { v.currentTime = st; v.play().catch(() => {}); }
+      else if (Math.abs(v.currentTime - st) > 0.25) v.currentTime = st;
+    } else {
+      if (!v.paused) v.pause();
+      if (!v.seeking && Math.abs(v.currentTime - st) > 0.02) v.currentTime = st;
+    }
+  }
+}
+
+function setPlaying(on) {
+  if (MODE !== 'motion') return;
+  on = on && videoSlots().length > 0;
+  playing = on;
+  $('btnPlay').textContent = on ? '❚❚ Pause' : '▶︎ Abspielen';
+  if (on) {
+    playT0 = performance.now() - previewT * 1000;
+    requestAnimationFrame(tick);
+  } else syncVideos(previewT, false);
+}
+function tick() {
+  if (!playing) return;
+  previewT = ((performance.now() - playT0) / 1000) % totalLen();
+  syncVideos(previewT, true);
+  syncTimeUI();
+  requestRender();
+  requestAnimationFrame(tick);
+}
+
+function syncTimeUI() {
+  if (MODE !== 'motion') return;
+  $('time').max = totalLen();
+  $('time').value = previewT;
+  $('timeOut').textContent = fmtS(previewT);
+}
+
+// Nach jeder Änderung an Clips oder Länge: Grenzen prüfen, Anzeige und Vorschau anpassen.
+function syncTimeline() {
+  if (MODE !== 'motion') return;
+  for (const i of videoSlots()) slots[i].start = clamp(slots[i].start, 0, maxStart(slots[i]));
+  previewT = Math.min(previewT, totalLen());
+  const L = baseLen();
+  $('lengthHint').textContent = `Einfach: ${fmtS(L)}, doppelt: ${fmtS(2 * L)}. Livebilder laufen bei „Doppelt“ vorwärts und zurück, Videos laufen durch.`;
+  syncTimeUI();
+  syncClipUI();
+  if (!playing) syncVideos(previewT, false);
+}
+
+function syncClipUI() {
+  if (MODE !== 'motion') return;
+  const s = selected >= 0 ? slots[selected] : null;
+  $('clipCtl').hidden = !(s && s.vid);
+  if (!s || !s.vid) return;
+  $('clipKind').querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b.dataset.v === 'live') === s.live));
+  const m = maxStart(s);
+  $('clipStartRow').hidden = s.live;
+  $('clipStart').max = m;
+  $('clipStart').value = s.start;
+  $('clipStart').disabled = m <= 0;
+  $('clipStartOut').textContent = `${fmtS(s.start)} – ${fmtS(Math.min(s.vid.duration, s.start + totalLen()))}`;
+}
+
+if (MODE === 'motion') {
+  document.querySelectorAll('[data-only="motion"]').forEach((el) => { el.hidden = false; });
+  $('fileOne').accept = 'image/*,video/*';
+  $('fileMany').accept = 'image/*,video/*';
+  $('btnAddMany').textContent = 'Mehrere Medien hinzufügen';
+  $('hint').textContent = 'Leeres Feld antippen: Foto oder Video wählen. Livebilder vorher in Fotos über Teilen → „Als Video sichern“ umwandeln. Ein Finger verschiebt, zwei Finger zoomen.';
+  $('btnPlay').addEventListener('click', () => setPlaying(!playing));
+  $('time').addEventListener('input', (e) => {
+    setPlaying(false);
+    previewT = Number(e.target.value);
+    syncTimeUI();
+    syncVideos(previewT, false);
+  });
+  $('clipKind').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b || selected < 0 || !slots[selected].vid) return;
+    slots[selected].live = b.dataset.v === 'live';
+    syncTimeline();
+    draw();
+  });
+  $('clipStart').addEventListener('input', (e) => {
+    if (selected < 0 || !slots[selected].vid) return;
+    setPlaying(false);
+    slots[selected].start = Number(e.target.value);
+    previewT = 0;
+    syncTimeline();
+    draw();
+  });
+}
+const tab = document.querySelector(`.tabbar a[data-tab="${MODE}"]`);
+if (tab) tab.classList.add('on');
+
 // ---------- Gesten: Verschieben & Zoomen ----------
 
 function toCanvas(e) {
@@ -594,6 +820,7 @@ function cellRect(i) { return layout(BASE_W, 1).cells[i]; }
 function normalize(i) {
   const s = slots[i], r = cellRect(i);
   const p = placement(s, r);
+  if (!p) return;
   s.ox = p.px / r.w;
   s.oy = p.py / r.h;
 }
@@ -653,7 +880,7 @@ canvas.addEventListener('pointermove', (e) => {
   const p = toCanvas(e);
   pointers.set(e.pointerId, p);
   if (Math.hypot(p.x - gesture.start.x, p.y - gesture.start.y) > 12) gesture.moved = true;
-  if (active < 0 || !slots[active].img) return;
+  if (active < 0 || !mediaDims(slots[active])) return;
   if (pointers.size === 1) {
     pan(active, p.x - prevP.x, p.y - prevP.y);
   } else if (pointers.size === 2) {
@@ -676,7 +903,7 @@ function endPointer(e) {
     if (tap) {
       tapSlot = active;
       // Erneutes Antippen des ausgewählten Bildes oder Tippen daneben blendet den Auswahlrahmen aus.
-      if (active < 0 || (gesture.wasSelected && slots[active].img)) select(-1);
+      if (active < 0 || (gesture.wasSelected && hasMedia(slots[active]))) select(-1);
       else select(active);
     } else if (active >= 0) select(active);
   }
@@ -686,7 +913,7 @@ canvas.addEventListener('pointercancel', endPointer);
 
 // Dateiauswahl nur aus einem echten Klick heraus öffnen (iOS-Vorgabe).
 canvas.addEventListener('click', () => {
-  if (tapSlot >= 0 && !slots[tapSlot].img) pickFor(tapSlot);
+  if (tapSlot >= 0 && !hasMedia(slots[tapSlot])) pickFor(tapSlot);
   tapSlot = -1;
 });
 
@@ -695,7 +922,7 @@ canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
   const p = toCanvas(e);
   const i = hitTest(p);
-  if (i < 0 || !slots[i].img) return;
+  if (i < 0 || !mediaDims(slots[i])) return;
   if (i !== selected) select(i);
   setZoom(i, slots[i].zoom * Math.exp(-e.deltaY * 0.002), p);
   draw();
@@ -708,29 +935,77 @@ document.addEventListener('gesturestart', (e) => e.preventDefault());
 
 let lastFile = null, lastUrl = null;
 
+async function exportStill() {
+  const W = BASE_W * exportScale;
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = Math.round(W * FORMATS[settings.format]);
+  render(c.getContext('2d'), W, exportScale, 'export');
+  const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.95));
+  c.width = c.height = 0;
+  if (!blob) throw new Error('Bild konnte nicht erzeugt werden');
+  return blob;
+}
+
+// Bewegte Collage: Bild für Bild (30 fps) rendern; Clips werden exakt auf die jeweilige Zeit gesetzt.
+async function exportMotion(onProgress) {
+  const mb = await import('./vendor/mediabunny.min.mjs');
+  setPlaying(false);
+  const W = BASE_W * exportScale, H = Math.round(W * FORMATS[settings.format]);
+  const bitrate = exportScale === 2 ? 40e6 : 16e6;
+  let codec = null;
+  for (const c of ['avc', 'hevc', 'vp9', 'av1']) {
+    if (await mb.canEncodeVideo(c, { width: W, height: H })) { codec = c; break; }
+  }
+  if (!codec) throw new Error('Videokodierung wird auf diesem Gerät nicht unterstützt');
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const x = c.getContext('2d');
+  const output = new mb.Output({ format: new mb.Mp4OutputFormat({ fastStart: 'in-memory' }), target: new mb.BufferTarget() });
+  const src = new mb.CanvasSource(c, { codec, bitrate, keyFrameInterval: 1 });
+  output.addVideoTrack(src, { frameRate: FPS });
+  await output.start();
+  const vids = videoSlots();
+  const F = Math.round(totalLen() * FPS);
+  for (let f = 0; f < F; f++) {
+    const t = f / FPS;
+    for (const i of vids) await seekTo(slots[i].vid, srcTime(slots[i], t));
+    render(x, W, exportScale, 'export');
+    await src.add(t, 1 / FPS);
+    onProgress((f + 1) / F);
+  }
+  src.close();
+  await output.finalize();
+  c.width = c.height = 0;
+  return new Blob([output.target.buffer], { type: 'video/mp4' });
+}
+
 $('btnSave').addEventListener('click', async () => {
-  const btn = $('btnSave');
+  const btn = $('btnSave'), label = btn.textContent;
   btn.disabled = true;
   try {
-    const W = BASE_W * exportScale;
-    const c = document.createElement('canvas');
-    c.width = W;
-    c.height = Math.round(W * FORMATS[settings.format]);
-    render(c.getContext('2d'), W, exportScale, 'export');
-    const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.95));
-    c.width = c.height = 0;
-    if (!blob) throw new Error('toBlob');
+    const motion = MODE === 'motion' && videoSlots().length > 0;
+    const blob = motion ? await exportMotion((f) => { btn.textContent = Math.round(f * 100) + ' %'; }) : await exportStill();
     const d = new Date();
-    const name = `collage-${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}.jpg`;
-    lastFile = new File([blob], name, { type: 'image/jpeg' });
+    const name = `collage-${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}-${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}.${motion ? 'mp4' : 'jpg'}`;
+    lastFile = new File([blob], name, { type: blob.type });
     if (lastUrl) URL.revokeObjectURL(lastUrl);
     lastUrl = URL.createObjectURL(blob);
-    $('result').src = lastUrl;
+    $('result').hidden = motion;
+    $('resultVideo').hidden = !motion;
+    if (motion) { $('resultVideo').src = lastUrl; $('resultVideo').play().catch(() => {}); } else $('result').src = lastUrl;
+    $('resultHint').textContent = motion
+      ? '„Sichern / Teilen“ → „Video sichern“ legt es in Fotos ab.'
+      : 'Mit „Sichern / Teilen“ → „Bild sichern“ landet es in Fotos. Alternativ Bild lange drücken.';
     $('sheet').hidden = false;
   } catch (err) {
-    alert('Export fehlgeschlagen.');
+    console.error(err);
+    alert('Export fehlgeschlagen' + (err && err.message ? ': ' + err.message : '.'));
   } finally {
     btn.disabled = false;
+    btn.textContent = label;
+    if (MODE === 'motion') syncVideos(previewT, false);
   }
 });
 
@@ -747,12 +1022,13 @@ $('btnShare').addEventListener('click', async () => {
     a.remove();
   }
 });
-$('btnClose').addEventListener('click', () => { $('sheet').hidden = true; });
+$('btnClose').addEventListener('click', () => { $('resultVideo').pause(); $('sheet').hidden = true; });
 
 // ---------- Hilfsfunktionen & Start ----------
 
 function clamp(v, a, b) { return Math.min(b, Math.max(a, v)); }
 function pad2(n) { return String(n).padStart(2, '0'); }
+function fmtS(t) { return t.toFixed(1).replace('.', ',') + ' s'; }
 function fmtDate(t) {
   const d = new Date(t);
   return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;

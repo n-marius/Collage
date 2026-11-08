@@ -18,7 +18,6 @@
 <header>
   <button id="btnProjects" class="title" aria-label="Projekte"><span id="projName">Collage</span> ▾</button>
   <div class="nav">
-    <a class="navlink" href="video.html">Video-EQ</a>
     <button id="btnSave" class="primary">Exportieren</button>
   </div>
 </header>
@@ -26,6 +25,11 @@
 <main>
   <div id="stage">
     <canvas id="canvas" aria-label="Collage-Vorschau"></canvas>
+  </div>
+  <div class="row playrow" data-only="motion" hidden>
+    <button id="btnPlay">▶︎ Abspielen</button>
+    <input type="range" id="time" min="0" max="1" step="0.01" value="0">
+    <output id="timeOut"></output>
   </div>
   <p class="hint" id="hint">Leeres Feld antippen: Bild wählen. Ein Finger verschiebt, zwei Finger zoomen. Ausgewähltes Bild erneut antippen: Auswahlrahmen aus.</p>
 
@@ -37,12 +41,28 @@
 
     <div class="group" id="selGroup" hidden>
       <h2 id="selTitle">Ausgewähltes Bild</h2>
+      <div id="clipCtl" hidden>
+        <div class="seg" id="clipKind">
+          <button data-v="live">Livebild</button>
+          <button data-v="video">Video</button>
+        </div>
+        <label class="slider" id="clipStartRow">Start <input type="range" id="clipStart" min="0" max="1" step="0.01"><output id="clipStartOut"></output></label>
+      </div>
       <label class="slider">Zoom <input type="range" id="zoom" min="1" max="5" step="0.01" value="1"></label>
       <div class="row">
         <button id="btnReplace">Ersetzen</button>
         <button id="btnCenter">Zentrieren</button>
         <button id="btnRemove">Entfernen</button>
       </div>
+    </div>
+
+    <div class="group" data-only="motion" hidden>
+      <h2>Länge</h2>
+      <div class="seg" id="length">
+        <button data-v="1">Einfach</button>
+        <button data-v="2">Doppelt</button>
+      </div>
+      <p class="hint left" id="lengthHint"></p>
     </div>
 
     <div class="group">
@@ -100,7 +120,8 @@
 <div id="sheet" class="overlay" hidden>
   <div class="sheet-inner">
     <img id="result" alt="Fertige Collage">
-    <p class="hint">Mit „Sichern / Teilen“ → „Bild sichern“ landet es in Fotos. Alternativ Bild lange drücken.</p>
+    <video id="resultVideo" playsinline controls loop muted hidden></video>
+    <p class="hint" id="resultHint">Mit „Sichern / Teilen“ → „Bild sichern“ landet es in Fotos. Alternativ Bild lange drücken.</p>
     <div class="row">
       <button id="btnShare" class="primary">Sichern / Teilen</button>
       <button id="btnClose">Schließen</button>
@@ -118,6 +139,12 @@
     <p class="hint" id="storageHint"></p>
   </div>
 </div>
+
+<nav class="tabbar">
+  <a href="./" data-tab="still">Collage</a>
+  <a href="./?m=motion" data-tab="motion">Bewegt</a>
+  <a href="video.html" data-tab="video">Video-EQ</a>
+</nav>
 
 <script src="app.js"></script>
 </body>

@@ -1,4 +1,4 @@
-const CACHE = 'collage-v3';
+const CACHE = 'collage-v4';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
   'video.html', 'video.js', 'vendor/mediabunny.min.mjs'];
