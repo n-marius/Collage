@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Abpraller</title>
+<meta name="theme-color" content="#111111">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Collage">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Abpraller</h1>
+  <button id="btnExport" class="primary" disabled>Exportieren</button>
+</header>
+
+<main>
+  <div class="row">
+    <button id="btnPick">Video wählen</button>
+  </div>
+  <video id="video" playsinline muted hidden></video>
+  <div class="row playrow">
+    <button id="btnPlay" disabled>▶︎ Vorschau</button>
+  </div>
+  <p class="hint" id="status">Das Video läuft vorwärts und rückwärts, so oft wie eingestellt. Ohne Ton.</p>
+
+  <section class="panel">
+    <div class="group">
+      <h2>Bereich</h2>
+      <label class="slider">Start <input type="range" id="start" min="0" max="1" step="0.01" value="0"><output id="startOut"></output></label>
+      <label class="slider">Ende <input type="range" id="end" min="0" max="1" step="0.01" value="1"><output id="endOut"></output></label>
+    </div>
+    <div class="group">
+      <h2>Wiederholungen</h2>
+      <label class="slider">Anzahl <input type="range" id="count" min="1" max="20" step="1"><output id="countOut"></output></label>
+      <p class="hint left" id="lenInfo"></p>
+    </div>
+    <div class="group">
+      <h2>Auflösung</h2>
+      <div class="seg" id="res">
+        <button data-v="1920">Full HD (Instagram)</button>
+        <button data-v="0">Original</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<input type="file" id="file" accept="video/*" hidden>
+
+<div id="sheet" class="overlay" hidden>
+  <div class="sheet-inner">
+    <video id="resultVideo" playsinline controls loop muted></video>
+    <p class="hint" id="resultInfo"></p>
+    <div class="row">
+      <button id="btnShare" class="primary">Sichern / Teilen</button>
+      <button id="btnClose">Schließen</button>
+    </div>
+  </div>
+</div>
+
+<nav class="tabbar">
+  <a href="./" data-tab="still">Collage</a>
+  <a href="./?m=motion" data-tab="motion">Bewegt</a>
+  <a href="bounce.html" data-tab="bounce" class="on">Abpraller</a>
+  <a href="video.html" data-tab="video">Video-EQ</a>
+</nav>
+
+<script type="module" src="bounce.js"></script>
+</body>
+</html>

@@ -12,3 +12,7 @@ Lädt ein Video, kopiert die Videospur unverändert (keine Neukodierung) und bea
 Gleiche Collage-Funktion, zusätzlich mit Videos und Livebildern (Livebilder vorher in Fotos per „Als Video sichern“ umwandeln; Videos bis 4 s gelten zunächst als Livebild, umschaltbar). Länge: einfach (längstes Livebild, sonst 3 s) oder doppelt. Livebilder laufen einmal durch, bei „Doppelt“ vorwärts und zurück; Videos laufen ab wählbarem Startpunkt durch. Export als MP4 (H.264, 30 fps, ohne Ton), Bild für Bild gerendert. Eigene Projektliste.
 
 Navigation zwischen den drei Funktionen über die Leiste unten.
+
+## Abpraller (`bounce.html`)
+
+Video laden, Bereich (Start/Ende) wählen, Anzahl der Wiederholungen (1–20) einstellen. Ein Durchgang läuft vorwärts und rückwärts; er wird einmal kodiert und für die Wiederholungen unverändert kopiert. Export als MP4 (30 fps, ohne Ton), Full HD oder Originalgröße.

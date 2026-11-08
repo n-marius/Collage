@@ -1,7 +1,7 @@
-const CACHE = 'collage-v4';
+const CACHE = 'collage-v5';
 const FILES = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png',
-  'video.html', 'video.js', 'vendor/mediabunny.min.mjs'];
+  'video.html', 'video.js', 'bounce.html', 'bounce.js', 'vendor/mediabunny.min.mjs'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
